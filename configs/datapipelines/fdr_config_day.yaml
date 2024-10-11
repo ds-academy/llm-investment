@@ -1,0 +1,19 @@
+data_pipelines:
+  name: FinanceDataReader
+  module: "ff.data.providers.finance_data_reader"
+  storage_type: "local"  # "local" 또는 "gcs"
+  base_path: "data/1d/KOR/stocks"  # 저장 경로
+  bucket_name: "gopax-trader-bucket"  # GCS 버킷 이름
+  utc_offset: 0  # UTC: 0, KST: 9
+  interval: "1d"  # 1minutes
+  period: "max"
+  start_date: "1970-01-01"
+  end_date: "TODAY"
+  stocks:
+  - symbol: "005930"
+    full_name: 삼성전자
+    exchange: KRX
+
+  - symbol: "000660"
+    full_name: SK하이닉스
+    exchange: KRX

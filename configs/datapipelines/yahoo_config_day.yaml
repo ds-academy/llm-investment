@@ -1,0 +1,16 @@
+data_pipelines:
+  name: YahooFinance
+  module: "ff.data.providers.yahoo"
+  storage_type: "local"  # "local" 또는 "gcs"
+  base_path: "data/1d/USA/stocks"  # 저장 경로
+  bucket_name: "gopax-trader-bucket"  # GCS 버킷 이름
+  utc_offset: 0  # UTC: 0, KST: 9
+  interval: "1d"  # 1minutes
+  period: "max"
+  start_date: "1970-01-01"
+  end_date: "TODAY"
+  stocks:
+    - symbol: AAPL
+      full_name: Apple Inc.
+      exchange: NASDAQ
+

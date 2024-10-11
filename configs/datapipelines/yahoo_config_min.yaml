@@ -1,0 +1,27 @@
+data_pipelines:
+  name: YahooFinance
+  module: "ff.data.providers.yahoo"
+  storage_type: "local"  # "local" 또는 "gcs"
+  base_path: "data/1m/USA/stocks"  # 저장 경로
+  bucket_name: "gopax-trader-bucket"  # GCS 버킷 이름
+  utc_offset: 0  # UTC: 0, KST: 9, Currently not working
+  interval: "1m"  # 1minutes
+  period: "max"
+  start_date: "2024-07-30"
+  end_date: "TODAY"
+  stocks:
+    - symbol: AAPL
+      full_name: Apple Inc.
+      exchange: NASDAQ
+#    - symbol: MSFT
+#      full_name: Microsoft Corporation
+#      exchange: NASDAQ
+#    - symbol: AMZN
+#      full_name: Amazon.com Inc.
+#      exchange: NASDAQ
+#    - symbol: GOOGL
+#      full_name: Alphabet Inc.
+#      exchange: NASDAQ
+#    - symbol: META
+#      full_name: Meta Platforms Inc.
+#      exchange: NASDAQ
