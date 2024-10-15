@@ -24,5 +24,9 @@ pip install -e .
 
 # Usage 
 
-- TBD 
+- The library contains the following modules:
+    - `llm_investment.data`: contains the data loader for the historical price data
+    - `llm_investment.model`: contains the LLM model
+    - `llm_investment.server`: contains the flask server for the REST API
+    - `llm_investment.utils`: contains the utility functions
 
