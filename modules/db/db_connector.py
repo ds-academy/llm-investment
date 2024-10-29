@@ -15,12 +15,17 @@ class DBConnector(ABC):
             # 다음 줄을 추가하여 쿼리 로그를 활성화합니다.
             client_flag=pymysql.constants.CLIENT.MULTI_STATEMENTS
         )
+        self.cursor = self.connection.cursor()
 
     def execute_query(self, query, params=None):
         with self.connection.cursor() as cursor:
             cursor.execute(query, params)
             self.connection.commit()
             return cursor.fetchall()
+        
+    def get_last_insert_id(self):
+        self.cursor.execute("SELECT LAST_INSERT_ID()")
+        return self.cursor.fetchone()['LAST_INSERT_ID()']
 
     @abstractmethod
     def select(self):
