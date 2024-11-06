@@ -1,3 +1,4 @@
+import os
 from openai import OpenAI
 from typing import List, Dict, Any, Tuple
 from modules.llm.utils import GPT_PROMPT
@@ -127,13 +128,22 @@ class GPTModel:
         except Exception as e:
             raise RuntimeError(f"텍스트 생성 오류: {str(e)}")
 
-# if __name__ == "__main__":
-#     api_key = os.environ.get("OPENAI_API_KEY")
-#     if not api_key:
-#         raise ValueError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
-#
-#     gpt_model = GPTModel(api_key=api_key, model_id="gpt-3.5-turbo-0125")
-#     fine_tune_jobs = gpt_model.list_fine_tune_jobs(20)
-#     for job in fine_tune_jobs:
-#         print(f"Job ID: {job['id']}, Status: {job['status']}")
+if __name__ == "__main__":
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
+
+    gpt_model = GPTModel(api_key=api_key, model_id="gpt-3.5-turbo-0125")
+
+    file_path = "./assets/fine_tune_data.jsonl"
+    
+    # fine_tune_jobs = gpt_model.list_fine_tune_jobs(20)
+    # for job in fine_tune_jobs:
+    #     print(f"Job ID: {job['id']}, Status: {job['status']}")
+
+    # try:
+    #     job_id, status = gpt_model.fine_tune(file_path)
+    #     print(f"Fine-tuning 작업이 시작되었습니다. 작업 ID: {job_id}, 상태: {status}")
+    # except RuntimeError as e:
+    #     print(e)
 
