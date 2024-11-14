@@ -1,9 +1,8 @@
 db_config = {
-    'user': 'Input your user name',
-    'password': 'Input your password',
-    'host': 'project-db-campus.smhrd.com',
+    'user': 'Insa5_App_final_2',
+    'password': 'aischool2',
+    'host': 'project-db-stu3.smhrd.com',
     'port': 3307,
-    'database': 'Input your database name',
+    'database': 'Insa5_App_final_2',
     'name': 'MYSQL'
 }
-
