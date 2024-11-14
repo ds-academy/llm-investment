@@ -4,7 +4,8 @@ import numpy as np
 from collections import defaultdict
 
 
-data_path = "../../../assets/fine_tune_sample1.jsonl"
+# data_path = "../../../assets/fine_tune_data.jsonl"
+data_path = "./assets/fine_tune_data.jsonl"
 
 # Load the dataset
 with open(data_path, "r", encoding="utf-8") as f:

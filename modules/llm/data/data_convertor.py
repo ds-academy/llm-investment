@@ -31,12 +31,20 @@ def convert_file(input_file, output_file):
             elif in_block:
                 current_block += line
 
+def convert_to_jsonl(input_file, output_file):
+    with open(input_file, "r", encoding="utf-8") as infile, open(output_file, "w", encoding="utf-8") as outfile:
+        data = json.load(infile)  # 전체 파일을 JSON 형식으로 로드
+        for game in data["games"]:
+            # for message in game["messages"]:
+            json_line = json.dumps(game, ensure_ascii=False)
+            outfile.write(json_line + "\n")  # JSON 객체를 한 줄로 작성하여 JSONL로 변환
+
 
 def main():
-    input_file = "../../../assets/fine_tune_data.txt"
-    output_file = "../../../assets/fine_tune_data.jsonl"
+    input_file = "./assets/fine_tune_data.txt"
+    output_file = "./assets/fine_tune_data.jsonl"
 
-    convert_file(input_file, output_file)
+    convert_to_jsonl(input_file, output_file)
     print(f"변환이 완료되었습니다. 결과가 {output_file}에 저장되었습니다.")
 
 
