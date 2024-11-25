@@ -1,215 +1,508 @@
 import json
 from flask import Blueprint, request, jsonify, current_app
 from modules.db.game_db import GameDBConnector
-from modules.llm.chat_gpt import GPTModel
 
 game_bp = Blueprint("game", __name__)
 
-def get_gpt_model():
-    api_key = current_app.config["OPENAI_API_KEY"]
-    model_id = current_app.config["GPT_MODEL_ID"]
-    return GPTModel(api_key=api_key, model_id=model_id)
+@game_bp.route('/selectstocks', methods=['POST'])
+def selectstocks():
+    db_connector = GameDBConnector()
 
+    # App으로부터 sector 텍스트 받아오기
+    sector = request.json.get("sector")
 
-def parse_model_response(response):
+    # sector 텍스트가 없는 경우
+    if not sector:
+        return jsonify({"error": "No sector text provided"})
+
     try:
-        if isinstance(response, str):
-            parsed_response = json.loads(response)
-        elif isinstance(response, dict):
-            parsed_response = response
+        # DB에서 sector에 따른 회사 가명(alias) 조회
+        aliases = db_connector.select_sector_aliases(sector)
+
+        # 가명 값이 없는 경우
+        if not aliases:
+            return jsonify({"success": False, "error": "Company alias not found"})
         else:
-            raise ValueError("Unexpected response type")
+            # 가명 값이 있는 경우
+            return jsonify({"success": True, "alias": aliases})
 
-        # 필수 필드 확인
-        required_fields = ['answer', 'user_invest_type', 'confidence']
-        for field in required_fields:
-            if field not in parsed_response:
-                raise KeyError(f"Missing required field: {field}")
+    except Exception as error:
+        print(f"Error: {error}")
+        return jsonify({'success': False, 'message': str(error)})
 
-        return parsed_response, None
+    finally:
+        db_connector.close()
 
-    except json.JSONDecodeError as e:
-        error = {
-            "error_type": "JSONDecodeError",
-            "error_message": "응답을 JSON으로 파싱할 수 없습니다.",
-            "original_response": response[:100] + "..." if len(response) > 100 else response
-        }
-        return None, error
+@game_bp.route("/save_check", methods=['POST'])
+def save_check():
+    db_connector = GameDBConnector()
 
-    except (ValueError, KeyError) as e:
-        error = {
-            "error_type": type(e).__name__,
-            "error_message": str(e),
-            "original_response": response if isinstance(response, str) else str(response)
-        }
-        return None, error
+    # App으로부터 user_id 받아오기
+    idToken = request.json.get("token")
 
-@game_bp.route("/next-turn", methods=["POST"])
+    # DB로부터 GAME_IDX 값 조회
+    try:
+        # DB로부터 받은 IDX 값에서 추출
+        idx = db_connector.select_user_game_idx(idToken)[0]['GAME_IDX']
+        return jsonify({'success': True, 'idx':idx})
+
+    except Exception as error :
+        # 예외가 발생한 경우 에러 메시지 반환
+        print(f"Error:: {error}")
+        return jsonify({'success': False, 'message':str(error)})
+
+@game_bp.route("/start", methods=['POST'])
+def start():
+    db_connector = GameDBConnector()
+
+    # App으로 부터 companyName 텍스트 가져오기
+    alias = request.json.get("companyName")
+
+    # 사용자 아이디 설정
+    user_id = request.json.get("token")
+
+    try:
+        # DB에서 게임을 조회하기 위한 회사를 조회
+        company_code = db_connector.select_game_company(alias)
+
+        # DB에서 게임을 실행하기 위해 남아있는 게임을 조회
+        game_idx = db_connector.select_game_generate(company_code)
+        print("남아있는 게임 조회",game_idx)
+
+        # 사용자에게 게임 저장
+        db_connector.update_game_idx_user(user_id, game_idx)
+
+        # 게임에 사용자 저장
+        db_connector.update_game_user(user_id, game_idx)
+
+        # 성공적으로 저장된 경우
+        return jsonify({"message": "Game successfully started", "game_idx": game_idx}), 200
+
+    except Exception as e:
+        # 예외가 발생한 경우 에러 메시지 반환
+        print("Error:", e)
+        return jsonify({"error": "Failed to start the game", "details": str(e)}), 500
+    
+@game_bp.route("/app_bar", methods=['POST'])
+def app_bar():
+    db_connector = GameDBConnector()
+    user_id = request.json.get('token')
+
+    try:
+        game_idx = db_connector.select_game_idx(user_id)
+        if game_idx is None:
+            return jsonify({"success": False, "error": "No game found for the specified user"}), 400
+
+        game_info_all = db_connector.select_game_info_all(game_idx)
+        company_alias = db_connector.select_stock_list_all(game_info_all[0]["COMPANY_CODE"])
+        current_turn = game_info_all[0]["CURRENT_TURN"]-1
+
+        game_detail_all = db_connector.select_game_detail_all(game_idx)
+        game_detail_turn = game_detail_all[current_turn]["CURRENT_DETAIL_TURN"] -1
+
+        chart_detail_all = db_connector.select_chart_detail_all(game_detail_all[game_detail_turn]["GAME_DETAIL_IDX"])
+        chart_time = chart_detail_all[game_detail_turn]["CHART_TIME"]
+
+        print("company_alias", company_alias)
+
+        return jsonify({"success": True,"company_alias": company_alias, "current_turn": current_turn, "chart_time":chart_time})
+
+    except Exception as error:
+        print(f"Error: {error}")
+        return jsonify({'success': False, 'message': str(error)})
+    
+    finally:
+        db_connector.close()
+
+@game_bp.route("bottom_bar", methods=['POST'])
+def bottom_bar():
+    db_connector = GameDBConnector()
+
+    user_id = request.json.get('token')
+
+    try:
+        game_idx = db_connector.select_game_idx(user_id)
+        if game_idx is None:
+            return jsonify({"success": False, "error": "No game found for the specified user"}), 400
+
+        game_info_all = db_connector.select_game_info_all(game_idx)
+        current_turn = game_info_all[0]["CURRENT_TURN"]-1
+
+        game_detail_all = db_connector.select_game_detail_all(game_idx)
+        # 현재 턴의 CURRENT_DETAIL_TURN 가져오기
+        current_detail_turn = game_detail_all[current_turn]["CURRENT_DETAIL_TURN"]
+
+        game_detail_turn = game_detail_all[current_turn]["CURRENT_DETAIL_TURN"]
+        current_money = game_detail_all[current_turn]["CURRENT_MONEY"]
+        position_money = game_detail_all[current_turn]["POSITION_MONEY"]
+
+        # 현재 차트 데이터 가져오기 (증가된 CURRENT_DETAIL_TURN에 따라 인덱스를 조정)
+        current_game_detail_idx = game_detail_all[current_turn]["GAME_DETAIL_IDX"]
+        chart_detail_all = db_connector.select_chart_detail_all(current_game_detail_idx)
+
+        # 현재의 CURRENT_DETAIL_TURN에 해당하는 차트 데이터 가져오기
+        if current_detail_turn > len(chart_detail_all):
+            current_detail_turn = len(chart_detail_all)
+
+        chart_current = chart_detail_all[current_detail_turn - 1]["CHART_CURRENT"]
+
+        return jsonify({"success": True, "current_money":current_money, "position_money":position_money, "chart_current":chart_current, "game_detail_turn":game_detail_turn})
+
+    except Exception as error:
+        print(f"Error: {error}")
+        return jsonify({'success': False, 'message': str(error)})
+    
+    finally:
+        db_connector.close()
+
+
+@game_bp.route("/chart", methods=['POST'])
+def chart():
+    db_connector = GameDBConnector()
+
+    user_id = request.json.get("token")
+
+    try:
+        # 게임 인덱스 가져오기
+        game_idx = db_connector.select_game_idx(user_id)
+
+        # 게임 정보 가져오기
+        game_info_all = db_connector.select_game_info_all(game_idx)
+        current_turn = game_info_all[0]["CURRENT_TURN"] - 1
+        print("chart 현재 턴:", current_turn)
+
+        # 게임 상세 정보 가져오기
+        game_detail_all = db_connector.select_game_detail_all(game_idx)
+        print("game_detail_all:", game_detail_all)
+
+        # 현재 턴의 CURRENT_DETAIL_TURN 가져오기
+        current_detail_turn = game_detail_all[current_turn]["CURRENT_DETAIL_TURN"]
+
+        # 현재 차트 데이터 가져오기 (증가된 CURRENT_DETAIL_TURN에 따라 인덱스를 조정)
+        current_game_detail_idx = game_detail_all[current_turn]["GAME_DETAIL_IDX"]
+        chart_detail_all = db_connector.select_chart_detail_all(current_game_detail_idx)
+
+        # 현재의 CURRENT_DETAIL_TURN에 해당하는 차트 데이터 가져오기
+        if current_detail_turn > len(chart_detail_all):
+            current_detail_turn = len(chart_detail_all)
+
+        chart_current = chart_detail_all[current_detail_turn - 1]["CHART_CURRENT"]
+        print("현재 차트 가격:", chart_current)
+
+        # 1턴부터 현재 턴까지의 모든 차트 데이터 가져오기
+        all_chart_data = db_connector.select_chart_detail_range(game_idx, current_turn+1)
+        print("all data", all_chart_data)
+
+        # 일별 데이터를 누적하여 시가(Open), 종가(Close), 고가(High), 저가(Low) 계산
+        daily_chart_data = []
+        current_day_data = []
+
+        for chart in all_chart_data:
+            # 새로운 턴이 시작되면 하루를 마감하고 새로운 데이터를 추가
+            if chart['GAME_DETAIL_IDX'] != current_game_detail_idx:
+                if current_day_data:
+                    open_price = current_day_data[0]["CHART_OPEN"]
+                    close_price = current_day_data[-1]["CHART_CURRENT"]
+                    high_price = max(item["CHART_HIGH"] for item in current_day_data)
+                    low_price = min(item["CHART_LOW"] for item in current_day_data)
+
+                    daily_chart_data.append({
+                        "open": open_price,
+                        "close": close_price,
+                        "high": high_price,
+                        "low": low_price
+                    })
+                current_day_data = []
+                current_game_detail_idx = chart['GAME_DETAIL_IDX']
+
+            # 현재 턴의 데이터를 추가
+            current_day_data.append(chart)
+
+        print("일별 데이터 :", current_day_data)
+
+        # 마지막 남은 데이터를 추가
+        if current_day_data:
+            open_price = current_day_data[0]["CHART_OPEN"]
+            close_price = current_day_data[-1]["CHART_CURRENT"]
+            high_price = max(item["CHART_HIGH"] for item in current_day_data)
+            low_price = min(item["CHART_LOW"] for item in current_day_data)
+
+            daily_chart_data.append({
+                "open": open_price,
+                "close": close_price,
+                "high": high_price,
+                "low": low_price
+            })
+
+        print("해당 턴의 종가 : ",close_price)
+        daily_money_data = []
+
+        for turn_idx, daily_data in enumerate(daily_chart_data, start=1):
+            turn_close_price = daily_data["close"]  # 각 턴의 종가 가져오기
+            money_data = db_connector.select_money_turn(game_idx, turn_idx, turn_close_price)
+            daily_money_data.extend(money_data)
+            
+            print("일별 차트 데이터", daily_chart_data)
+            print("현재 데이터", current_day_data)
+            print("일별 내 자산 데이터", daily_money_data)
+
+        return jsonify({
+            "success": True,
+            "current_day_data": current_day_data,
+            "chart_current": chart_current,
+            "daily_chart_data": daily_chart_data,
+            "daily_money" : daily_money_data
+        })
+
+    except Exception as error:
+        print(f"Error: {error}")
+        return jsonify({'success': False, 'message': str(error)}), 500
+
+    finally:
+        db_connector.close()
+
+
+@game_bp.route("/next_detail_turn", methods=['POST'])
+def next_detail_turn():
+
+    db_connector = GameDBConnector()
+
+    # App으로 부터 사용자 아이디 가져오기
+    user_id = request.json.get("token")
+
+    try:
+        game_idx = db_connector.select_game_idx(user_id)
+
+        game_info_all = db_connector.select_game_info_all(game_idx)
+        current_turn = game_info_all[0]["CURRENT_TURN"]-1
+
+        game_detail_all = db_connector.select_game_detail_all(game_idx)
+        game_detail_idx = game_detail_all[current_turn]["GAME_DETAIL_IDX"]
+
+        db_connector.update_next_detail_turn(game_detail_idx)
+        return jsonify({'success': True, 'message': 'Detail Turn updated successfully'})
+
+    except Exception as error:
+        print(f"Error: {error}")
+        return jsonify({'success': False, 'message': str(error)})
+    
+    finally:
+        db_connector.close()
+
+@game_bp.route("/next_turn", methods=['POST'])
 def next_turn():
+    db_connector = GameDBConnector()
+
+    # App으로 부터 사용자 아이디 가져오기
+    user_id = request.json.get("token")
+    current_money = request.json.get("currentMoney")
+    position_money = request.json.get("positionMoney")
+
     try:
-        # 사용자로부터 받은 데이터
-        data = request.get_json()
-        game_detail_idx = data.get("game_detail_idx")
-        if not game_detail_idx:
-            return jsonify({"error": "game_detail_idx가 제공되지 않았습니다."}), 400
 
-        # 현재 게임 세부 정보를 가져와 확인
-        db_connector = GameDBConnector()
-        game_detail_query = "SELECT GAME_TURN FROM GAME_DETAIL_TB WHERE GAME_DETAIL_IDX = %s"
-        game_detail = db_connector.select(game_detail_query, (game_detail_idx,))
-        
-        if not game_detail:
-            return jsonify({"error": "유효하지 않은 게임 세부 정보입니다."}), 400
+        game_idx = db_connector.select_game_idx(user_id)
 
-        current_turn = game_detail[0]["GAME_TURN"]
-        next_turn = current_turn + 1
+        db_connector.update_next_turn(game_idx)
 
-        # ChatGPT 모델을 사용하여 다음 턴의 데이터 생성
-        gpt_model = get_gpt_model()
-        prompt = f"Create the next turn scenario for game_detail_idx: {game_detail_idx}, current_turn: {current_turn}."
-        model_response = gpt_model.generate(prompt)
+        # 전체 게임 정보 가져오기
+        game_info_all = db_connector.select_game_info_all(game_idx)
 
-        # 응답 데이터 파싱
-        parsed_response, error = parse_model_response(model_response)
-        if error:
-            return jsonify({"error": error["error_message"]}), 500
+        # 현재 턴 정보 확인
+        current_turn = game_info_all[0]["CURRENT_TURN"] - 1
 
-        game_data = parsed_response
+        # 실제 턴
+        real_turn = current_turn + 1
 
-        # 1. CHART_DETAIL_TB에 새로운 차트 데이터 저장
-        chart_detail_ids = []
-        for time, chart in game_data["chart"]["times"].items():
-            chart_insert_query = """
-                INSERT INTO CHART_DETAIL_TB (CHART_OPEN, CHART_HIGH, CHART_LOW, CHART_CLOSE, CHART_TIME)
-                VALUES (%s, %s, %s, %s, %s)
-            """
-            chart_params = (
-                chart["start"],
-                chart["high"],
-                chart["low"],
-                chart["current"],
-                time,
-            )
-            db_connector.insert(chart_insert_query, chart_params)
-            chart_detail_ids.append(db_connector.get_last_insert_id())
+        # 게임 세부 정보 가져오기
+        game_detail_all = db_connector.select_game_detail_all(game_idx)
 
-        # 2. GAME_DETAIL_TB에 새로운 게임 세부 정보 저장
-        for idx, chart_detail_id in enumerate(chart_detail_ids):
-            game_detail_query = """
-                INSERT INTO GAME_DETAIL_TB (CHART_DETAIL_IDX, NEWS, REPORT, FINANCIAL_STATEMENTS, CURRENT_MONEY, POSITION_MONEY, GAME_TURN)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """
-            game_detail_params = (
-                chart_detail_id,
-                game_data["category"]["news"]["info"],
-                game_data["category"]["report"]["info"],
-                game_data["category"]["financial_statements"]["info"],
-                game_data.get("current_money", 0),
-                game_data.get("position_money", 0),
-                next_turn,  # 다음 턴
-            )
-            db_connector.insert(game_detail_query, game_detail_params)
 
-        response = {
-            "message": "다음 턴 데이터 생성 및 저장 완료",
-            "game_data": game_data,
-            "next_turn": next_turn,
-        }
-        return jsonify(response)
+        game_detail_idx = game_detail_all[current_turn]["GAME_DETAIL_IDX"]
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # 뉴스 리스트 가져오기
+        news_list = db_connector.select_news_list(game_idx, current_turn)
+        print(f"news_list: {news_list}, length: {len(news_list)}")
 
-@game_bp.route("/create-game", methods=["POST"])
-def create_game():
+        if current_turn != 0:
+            current_turn -= 1
+
+        warning_news = news_list[current_turn]["OUTNEWS_TITLE"]
+
+        db_connector.update_money(game_detail_idx, current_money, position_money)
+
+        print("리얼 턴 :", real_turn)
+
+        return jsonify({'success': True, 'warning_news': warning_news, "current_turn" : real_turn})
+
+    except Exception as error:
+        print(f"Error: {error}")
+        return jsonify({'success': False, 'message': str(error)})
+    
+    finally:
+        db_connector.close()
+
+@game_bp.route("/news", methods=['POST'])
+def news():
+
+    db_connector = GameDBConnector()
+
+    # App으로 부터 사용자 아이디 가져오기
+    user_id = request.json.get("token")
+
     try:
-        # 사용자로부터 받은 데이터
-        data = request.get_json()
-        user_id = data.get("user_id")
-        company_code = data.get("company_code")
-        sector = data.get("sector")
-        game_date = data.get("game_date")
+        game_idx = db_connector.select_game_idx(user_id)
 
-        if not user_id or not company_code or not sector or not game_date:
-            return jsonify({"error": "필수 정보(user_id, company_code, sector, game_date)가 제공되지 않았습니다."}), 400
+        game_info_all = db_connector.select_game_info_all(game_idx)
+        current_turn = game_info_all[0]["CURRENT_TURN"]
 
-        # ChatGPT 모델을 사용하여 데이터 생성
-        gpt_model = get_gpt_model()
-        prompt = f"Create a game scenario for user_id: {user_id}, company_code: {company_code}."
-        model_response = gpt_model.generate(prompt)
+        news_list = db_connector.select_news_list(game_idx, current_turn)
+        return jsonify({'success': True, "news_list":news_list})
 
-        # 응답 데이터 파싱
-        parsed_response, error = parse_model_response(model_response)
-        if error:
-            return jsonify({"error": error["error_message"]}), 500
-
-        game_data = parsed_response
-
-        db_connector = GameDBConnector()
-
-        # 1. CHART_DETAIL_TB에 데이터 저장
-        chart_detail_ids = []
-        for time, chart in game_data["chart"]["times"].items():
-            chart_insert_query = """
-                INSERT INTO CHART_DETAIL_TB (CHART_OPEN, CHART_HIGH, CHART_LOW, CHART_CLOSE, CHART_TIME)
-                VALUES (%s, %s, %s, %s, %s)
-            """
-            chart_params = (
-                chart["start"],
-                chart["high"],
-                chart["low"],
-                chart["current"],
-                time,
-            )
-            db_connector.insert(chart_insert_query, chart_params)
-            chart_detail_ids.append(db_connector.get_last_insert_id())
-
-        # 2. GAME_DETAIL_TB에 데이터 저장
-        for idx, chart_detail_id in enumerate(chart_detail_ids):
-            game_detail_query = """
-                INSERT INTO GAME_DETAIL_TB (CHART_DETAIL_IDX, NEWS, REPORT, FINANCIAL_STATEMENTS, CURRENT_MONEY, POSITION_MONEY, GAME_TURN)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """
-            game_detail_params = (
-                chart_detail_id,
-                game_data["category"]["news"]["info"],
-                game_data["category"]["report"]["info"],
-                game_data["category"]["financial_statements"]["info"],
-                game_data.get("current_money", 0),
-                game_data.get("position_money", 0),
-                idx + 1,  # 각 차트에 해당하는 턴
-            )
-            db_connector.insert(game_detail_query, game_detail_params)
-            game_detail_id = db_connector.get_last_insert_id()
-
-        # 3. GAME_INFO_TB에 데이터 저장 (게임 정보에 대한 기본 데이터 저장)
-        game_info_query = """
-            INSERT INTO GAME_INFO_TB (USER_ID, SECTOR, COMPANY_CODE, GAME_DETAIL_IDX, GAME_DATE)
-            VALUES (%s, %s, %s, %s, %s)
-        """
-        game_info_params = (
-            user_id,
-            sector,
-            company_code,
-            game_detail_id,
-            game_date,
-        )
-        db_connector.insert(game_info_query, game_info_params)
-
-        response = {
-            "message": "게임 데이터 생성 및 저장 완료",
-            "game_data": game_data
-        }
-        return jsonify(response)
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception as error:
+        print(f"Error: {error}")
+        return jsonify({'success': False, 'message': str(error)})
     
+    finally:
+        db_connector.close()
 
+@game_bp.route("/report", methods=['POST'])
+def report():
+    db_connector = GameDBConnector()
+
+    # App으로 부터 사용자 아이디 가져오기
+    user_id = request.json.get("token")
+
+    try:
+        game_idx = db_connector.select_game_idx(user_id)
+
+        game_info_all = db_connector.select_game_info_all(game_idx)
+        current_turn = game_info_all[0]["CURRENT_TURN"]
+
+        report_list = db_connector.select_report_list(game_idx, current_turn)
+        return jsonify({'success': True, "report_list":report_list})
+
+    except Exception as error:
+        print(f"Error: {error}")
+        return jsonify({'success': False, 'message': str(error)})
     
+    finally:
+        db_connector.close()
 
+@game_bp.route("/financial", methods=['POST'])
+def financial():
+    db_connector = GameDBConnector()
 
-def init_chat_module(app):
-    app.register_blueprint(game_bp)
-    if "OPENAI_API_KEY" not in app.config:
-        raise ValueError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
+    # App으로 부터 사용자 아이디 가져오기
+    user_id = request.json.get("token")
+
+    try:
+        game_idx = db_connector.select_game_idx(user_id)
+
+        game_info_all = db_connector.select_game_info_all(game_idx)
+        current_turn = game_info_all[0]["CURRENT_TURN"]
+
+        financial = db_connector.select_financial_list(game_idx, current_turn)
+        return jsonify({'success': True, "financial":financial})
+
+    except Exception as error:
+        print(f"Error: {error}")
+        return jsonify({'success': False, 'message': str(error)})
+    
+    finally:
+        db_connector.close()
+
+@game_bp.route("/buy", methods=['POST'])
+def buy():
+
+    db_connector = GameDBConnector()
+
+    # App으로 부터 사용자 아이디 가져오기
+    user_id = request.json.get("token")
+    quantity = request.json.get("quantity")
+    total = request.json.get("total")
+
+    try:
+        game_idx = db_connector.select_game_idx(user_id)
+        game_info_all = db_connector.select_game_info_all(game_idx)
+        current_turn = game_info_all[0]["CURRENT_TURN"]-1
+
+        game_detail_all = db_connector.select_game_detail_all(game_idx)
+        game_detail_idx = game_detail_all[current_turn]["GAME_DETAIL_IDX"]
+
+        db_connector.update_buy(game_detail_idx, current_money=total, position_money=quantity)
+
+        db_connector.update_next_detail_turn(game_detail_idx)
+
+        return jsonify({'success': True, 'message': 'Turn updated successfully'})
+
+    except Exception as error:
+
+        print(f"Error: {error}")
+        return jsonify({'success': False, 'message': str(error)})
+    
+    finally:
+        db_connector.close()
+
+@game_bp.route("/sell", methods=['POST'])
+def sell():
+
+    db_connector = GameDBConnector()
+
+    # App으로 부터 사용자 아이디 가져오기
+    user_id = request.json.get("token")
+    quantity = request.json.get("quantity")
+    total = request.json.get("total")
+
+    try:
+        game_idx = db_connector.select_game_idx(user_id)
+        game_info_all = db_connector.select_game_info_all(game_idx)
+        current_turn = game_info_all[0]["CURRENT_TURN"]-1
+
+        game_detail_all = db_connector.select_game_detail_all(game_idx)
+        game_detail_idx = game_detail_all[current_turn]["GAME_DETAIL_IDX"]
+
+        db_connector.update_sell(game_detail_idx, current_money=total, position_money=quantity)
+
+        db_connector.update_next_detail_turn(game_detail_idx)
+
+        return jsonify({'success': True, 'message': 'Turn updated successfully'})
+
+    except Exception as error:
+
+        print(f"Error: {error}")
+        return jsonify({'success': False, 'message': str(error)})
+    
+    finally:
+        db_connector.close()
+
+@game_bp.route("/game_end", methods=['POST'])
+def game_end():
+
+    db_connector = GameDBConnector()
+
+    # App으로 부터 사용자 아이디 가져오기
+    user_id = request.json.get("token")
+    profitRate = request.json.get("profitRate")
+
+    print("profitRate", profitRate)
+
+    score = int(profitRate * 100)
+    print("score", score)
+
+    try:
+        if score > 0 :
+            db_connector.update_game_success(user_id, score)
+        else :
+            db_connector.update_game_fail(user_id, score)
+
+        db_connector.update_game_reset(user_id)
+
+        return jsonify({'success': True, 'message': 'End updated successfully'})
+
+    except Exception as error:
+
+        print(f"Error: {error}")
+        return jsonify({'success': False, 'message': str(error)})
+    
+    finally:
+        db_connector.close()
